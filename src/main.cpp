@@ -20,6 +20,7 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/websocket.h>
+#include "esp_sleep.h"
 
 //
 #include "hmc_5883l_driver_port.h"
@@ -27,6 +28,11 @@
 // CPP
 #include <iostream>
 #include <string>
+
+// Power Management
+#include <zephyr/pm/pm.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/pm/policy.h>
 
 static bool flagIP = false;
 
@@ -290,13 +296,18 @@ void wifi_disconnect(void)
 }
 /* Threads =======================================================*/
 
+extern "C"
+{
+
 static void hmc_thread(void)
 {
+    std::cout << "Running thread...\n";
 	const struct device *const i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
     hmc_5883l_driver_t hmc_driver;
 	uint8_t hmc_buf[20];
 	uint8_t ret;
 	uint8_t command[2] = {0x06, 0x03};
+
 
     // Driver initialization
     hmc_5883l_driverInitPort(&hmc_driver, i2c_dev);
@@ -361,6 +372,7 @@ static void hmc_thread(void)
 	}
 #endif
 }
+}
 
 static struct net_mgmt_event_callback mgmt_cb;
 
@@ -399,13 +411,18 @@ static void handler(struct net_mgmt_event_callback *cb,
 	}
 }
 
+#define WAKEUP_TIME_SEC		(20)
 
 int main(void)
 {
-	int sock;
+    return 0;
+}
 
-    std::cout << "Example." << std::endl;
-    printk("WiFi Example\n\n");
+void wifi_thread(void)
+{
+
+	int sock;
+    std::cout << "WiFi Example\n\n";
 
     net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
                                  NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
@@ -414,6 +431,7 @@ int main(void)
 
     net_mgmt_add_event_callback(&wifi_cb);
     net_mgmt_add_event_callback(&ipv4_cb);
+    std::cout << "Callbacks\n";
     printk("Callbacks set.\n");
 
     k_sleep(K_SECONDS(2)); 
@@ -493,11 +511,12 @@ int main(void)
         wifi_status();
     }
     #endif
-
-    return 0;
 }
 
-#if 0
+
+#if 1
 K_THREAD_DEFINE(hmc_id, STACKSIZE, hmc_thread, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
-        #endif
+K_THREAD_DEFINE(wifi_id, STACKSIZE, wifi_thread, NULL, NULL, NULL,
+		PRIORITY+1, 0, 0);
+#endif
