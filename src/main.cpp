@@ -24,6 +24,10 @@
 //
 #include "hmc_5883l_driver_port.h"
 
+// CPP
+#include <iostream>
+#include <string>
+
 static bool flagIP = false;
 
 
@@ -201,8 +205,8 @@ void wifi_connect(void)
 
     struct wifi_connect_req_params wifi_params = {0};
 
-    wifi_params.ssid = AP_SSID_;
-    wifi_params.psk = AP_PSK_;
+    wifi_params.ssid = reinterpret_cast<uint8_t *>(const_cast<char*>(AP_SSID_));
+    wifi_params.psk = reinterpret_cast<uint8_t*>(const_cast<char*>(AP_PSK_));
     wifi_params.ssid_length = strlen(AP_SSID_);
     wifi_params.psk_length = strlen(AP_PSK_);
     wifi_params.channel = WIFI_CHANNEL_ANY;
@@ -396,10 +400,11 @@ static void handler(struct net_mgmt_event_callback *cb,
 }
 
 
-void main(void)
+int main(void)
 {
 	int sock;
 
+    std::cout << "Example." << std::endl;
     printk("WiFi Example\n\n");
 
     net_mgmt_init_event_callback(&wifi_cb, wifi_mgmt_event_handler,
@@ -457,6 +462,8 @@ void main(void)
             printk("Connection created.\n");
 
             printk("Sending...\n");
+            std::string log_str = "Logging from cpp.";
+            printk(log_str.c_str());
 
             char data[] = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:20.2|end";
 
@@ -481,6 +488,8 @@ void main(void)
         wifi_status();
     }
     #endif
+
+    return 0;
 }
 
 #if 0
