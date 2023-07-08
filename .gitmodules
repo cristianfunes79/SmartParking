@@ -1,0 +1,6 @@
+[submodule "ubidots-esp32"]
+	path = ubidots-esp32
+	url = https://github.com/ubidots/ubidots-esp32.git
+[submodule "ubidots/ubidots-python"]
+	path = ubidots/ubidots-python
+	url = https://github.com/ubidots/ubidots-python.git
