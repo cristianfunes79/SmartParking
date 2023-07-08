@@ -463,11 +463,15 @@ int main(void)
 
             printk("Sending...\n");
             std::string log_str = "Logging from cpp.";
-            printk(log_str.c_str());
+            printk("%s",log_str.c_str());
 
-            char data[] = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:20.2|end";
+//            char data[] = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:20.2|end";
 
-            int rc = send(sock4, data, strlen(data), 0);
+            static float xval = 0.35f;
+            xval++;
+            std::string data = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:" + std::to_string(xval) + "|end";
+
+            int rc = send(sock4, data.c_str(), strlen(data.c_str()), 0);
 
             printk("Data sent!\n");
             
@@ -477,7 +481,8 @@ int main(void)
             close(sock4);
         }
 
-        k_sleep(K_MINUTES(10));
+        //k_sleep(K_MINUTES(1));
+        k_sleep(K_SECONDS(10));
     }
 #if 0
     wifi_disconnect();
