@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
 #include <errno.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -22,6 +21,14 @@
 #include <zephyr/net/websocket.h>
 #include "esp_sleep.h"
 
+// SNTP
+#include <zephyr/net/sntp.h>
+#ifdef CONFIG_POSIX_API
+#include <arpa/inet.h>
+#endif
+
+#include <zephyr/posix/time.h>
+
 //
 #include "hmc_5883l_driver_port.h"
 
@@ -35,6 +42,20 @@
 #include <zephyr/pm/policy.h>
 
 static bool flagIP = false;
+
+struct hmc_values_s
+{
+   int x;
+   int y;
+   int z;
+   int sample = 123; 
+};
+
+typedef struct hmc_values_s hmc_values_t;
+static hmc_values_t hmc_values;
+
+K_SEM_DEFINE(hmc_sem, 0, K_SEM_MAX_LIMIT);
+K_SEM_DEFINE(wifi_sem, 0, K_SEM_MAX_LIMIT);
 
 
 /**
@@ -113,7 +134,7 @@ static int connect_cb(int sock, struct http_request *req, void *user_data)
 #define AP_PSK_ "00435763252"
 
 /* size of stack area used by each thread */
-#define STACKSIZE 1024
+#define STACKSIZE 2048
 
 /* scheduling priority used by each thread */
 #define PRIORITY 7
@@ -315,6 +336,7 @@ static void hmc_thread(void)
 
 	for(;;)
 	{
+        std::cout << "hmc\r\n";
 		int16_t xx, yy, zz;
 		uint8_t cmd;
 		k_msleep(100);
@@ -345,8 +367,14 @@ static void hmc_thread(void)
 		zz = hmc_buf[5] << 8 | hmc_buf[6];
 		yy = hmc_buf[7] << 8 | hmc_buf[8];
 
-		printk("x:(%i) y:(%i) z:(%i) status:(%x)\r\n", xx, yy, zz, hmc_buf[9]);
-		printk("idA:(%x) idB:(%x) idC:(%x)", hmc_buf[10], hmc_buf[11], hmc_buf[12]);
+        hmc_values.x = xx;
+        hmc_values.y = yy;
+        hmc_values.z = zz;
+        //k_sem_give(&hmc_sem);
+  //      k_sem_take(&wifi_sem, K_FOREVER);
+
+		//printk("x:(%i) y:(%i) z:(%i) status:(%x)\r\n", xx, yy, zz, hmc_buf[9]);
+		//printk("idA:(%x) idB:(%x) idC:(%x)\r\n", hmc_buf[10], hmc_buf[11], hmc_buf[12]);
 	}
 
 #if 0
@@ -420,7 +448,7 @@ int main(void)
 
 void wifi_thread(void)
 {
-
+    k_sleep(K_SECONDS(10)); 
 	int sock;
     std::cout << "WiFi Example\n\n";
 
@@ -432,37 +460,53 @@ void wifi_thread(void)
     net_mgmt_add_event_callback(&wifi_cb);
     net_mgmt_add_event_callback(&ipv4_cb);
     std::cout << "Callbacks\n";
-    printk("Callbacks set.\n");
 
     k_sleep(K_SECONDS(2)); 
     wifi_connect();
-    printk("Connection Done...\n");
-    //k_sem_take(&wifi_connected, K_FOREVER);
-    printk("2Connection Done...\n");
-    //k_sem_take(&ipv4_address_obtained, K_FOREVER);
-    printk("Ready...\n\n");
+    std::cout << "Ready...\n\n";
 
     while(!flagIP) k_sleep(K_SECONDS(1));
 
-	#if 0
-    printk("Looking up IP addresses:\n");
-    struct zsock_addrinfo *res;
-    nslookup("iot.beyondlogic.org", &res);
-    print_addrinfo_results(&res);
+    //SNTP-----------------------
+    struct sntp_ctx ctx;
+    struct sockaddr_in addr;
+    struct sntp_time sntp_time;
+    int rv;
+    struct timeval tv;
+    struct timespec ts;
 
-    printk("Connecting to HTTP Server:\n");
-    sock = connect_socket(&res);
-    http_get(sock, "iot.beyondlogic.org", "/test.txt");
-    zsock_close(sock);
-    
-    wifi_connect();
-    // Stay connected for 30 seconds, then disconnect.
-	#endif
+    /* ipv4 */
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(123);
+    zsock_inet_pton(AF_INET, "170.210.222.10", &addr.sin_addr);
+
+    rv = sntp_init(&ctx, (struct sockaddr *) &addr,
+               sizeof(struct sockaddr_in));
+    if (rv < 0) {
+        std::cout << "Failed to init SNTP IPv4\r\n";
+    }
+
+    std::cout << "Sending SNTP IPv4 request...\r\n";
+    rv = sntp_query(&ctx, 4 * MSEC_PER_SEC, &sntp_time);
+    if (rv < 0) {
+        std::cout << "SNTP IPv4 request failed: " << rv << "\r\n";
+    }
+
+
+    std::cout << "status: " << rv << "\r\n";
+    printk("time since Epoch: high word: %u, low word: %u",
+        (uint32_t)(sntp_time.seconds >> 32), (uint32_t)sntp_time.seconds);
+
+    ts.tv_sec = sntp_time.seconds;
+
+    //-----------------------SNTP
+
 
     while(1)
     {
+        printk("WiFi\r\n\n");
         // Socket stuff
-
         int sock4 = -1;
         int websock4 = -1;
         struct sockaddr_in addr4;
@@ -480,14 +524,16 @@ void wifi_thread(void)
             printk("Connection created.\n");
 
             printk("Sending...\n");
+
             std::string log_str = "Logging from cpp.";
             printk("%s",log_str.c_str());
 
-//            char data[] = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:20.2|end";
-
-            static float xval = 0.35f;
-            xval++;
-            std::string data = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>fieldX:" + std::to_string(xval) + "|end";
+            std::cout << "Converting...\r\n";
+            std::string xdata = "fieldX:" + std::to_string(hmc_values.x);
+            std::string ydata = "fieldY:" + std::to_string(hmc_values.y);
+            std::string zdata = "fieldZ:" + std::to_string(hmc_values.z);
+            std::cout << "Convertion done!\r\n";
+            std::string data = "ESP32/1.0|POST|BBFF-DQaxQtnjWZzKDzTsVRtOUfNLulXxqf|64a2425cbe387b5d626506e1:pythonTestDevice=>"+xdata+","+ydata+","+zdata+"|end";
 
             int rc = send(sock4, data.c_str(), strlen(data.c_str()), 0);
 
@@ -495,12 +541,21 @@ void wifi_thread(void)
             
             if (rc < 0)
                 printk("Error sending.\n");
+
+#if 1
+            std::cout << "Converting...\r\n";
+            std::string timestamp_str = "time: " + std::to_string(ts.tv_sec + k_uptime_get()/1000);
+            std::cout << "Convertion Done\r\n";
+            std::cout << timestamp_str << std::endl;
+#endif
             
             close(sock4);
+            //k_sem_give(&wifi_sem);
+            //k_sem_take(&hmc_sem, K_FOREVER);
         }
 
         //k_sleep(K_MINUTES(1));
-        k_sleep(K_SECONDS(10));
+        k_sleep(K_SECONDS(5));
     }
 #if 0
     wifi_disconnect();
@@ -518,5 +573,5 @@ void wifi_thread(void)
 K_THREAD_DEFINE(hmc_id, STACKSIZE, hmc_thread, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 K_THREAD_DEFINE(wifi_id, STACKSIZE, wifi_thread, NULL, NULL, NULL,
-		PRIORITY+1, 0, 0);
+		PRIORITY, 0, 0);
 #endif
